@@ -1,0 +1,84 @@
+default:
+  image: python:latest
+
+cache:
+  paths:
+    - .cache/pip
+    - venv/
+
+before_script:
+  - curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+  - apt install -y nodejs
+  - npm install -g aws-cdk-lib aws-cdk
+  - pip3 install -r requirements.txt -r requirements-dev.txt
+
+stages:
+  - test
+  - diff
+  - deploy
+
+.test_base:
+  stage: test
+  tags:
+    - cdk
+
+.diff_base:
+  stage: diff
+  script:
+    - cdk diff --profile ${PROFILE}
+  tags:
+    - cdk
+  rules:
+    - changes:
+        - app.py
+        - requirements.txt
+        - requirements-dev.txt
+        - stacks/**/*
+        - tests/**/*
+      allow_failure: true
+
+.deploy_base:
+  stage: deploy
+  script:
+    - python3 scripts/change_cdk_json_file.py
+    - cdk deploy --profile ${PROFILE}
+  tags:
+    - cdk
+
+# Test
+test:static:flake8:
+  extends: .test_base
+  script:
+    - flake8 --ignore=E501 app.py stacks/ tests/
+  rules:
+    - if: "$CI_COMMIT_BRANCH =~ /^feature/"
+
+test:unit:pytest:
+  extends: .test_base
+  script:
+    - echo "pytest"
+
+# Diff
+diff:
+  extends: .diff_base
+  variables:
+    PROFILE: study
+    AWS_PROFILE: study
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+
+# Deploy
+deploy:
+  extends: .deploy_base
+  variables:
+    PROFILE: study
+    AWS_PROFILE: study
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop" || $CI_COMMIT_BRANCH == "master"'
+      changes:
+        - app.py
+        - requirements.txt
+        - requirements-dev.txt
+        - stacks/**/*
+        - tests/**/*
+      when: manual
